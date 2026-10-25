@@ -8,6 +8,8 @@ from PyQt5.QtCore import Qt, QTimer, QPoint, QSize
 from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
 from PyQt5.QtCore import QUrl
 
+from PyQt5.QtCore import QElapsedTimer
+
 
 class DesktopPet(QWidget):
     def __init__(self):
@@ -64,6 +66,12 @@ class DesktopPet(QWidget):
         self._combo_timer.timeout.connect(self._on_combo_timeout)
         self._in_combo = False
         self._is_playing_jiao = False
+
+        # === 长按/单击判定变量 ===
+        self._press_time = 0  # 鼠标按下的时间戳(ms)
+        self.LONG_PRESS_THRESHOLD = 300  # 长按阈值(ms)，超过此值不算单击
+
+        self._press_timer = QElapsedTimer()
 
         # === 点击缓存机制（Buffer）===
         self._click_buffer = 0
@@ -241,14 +249,15 @@ class DesktopPet(QWidget):
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             self._pending_click_pos = event.globalPos()
-            self._click_timer.start(10)
+            self._press_timer.restart()
+            #self._click_timer.start(10)
             event.accept()
 
     def mouseMoveEvent(self, event):
         if event.buttons() == Qt.LeftButton:
             delta = event.globalPos() - self._pending_click_pos
             if delta.manhattanLength() > 5 and not self._is_dragging:
-                self._click_timer.stop()
+                #self._click_timer.stop()
                 self._is_dragging = True
                 self.setCursor(QCursor(Qt.ClosedHandCursor))
                 self.load_animation("drag")
@@ -261,11 +270,19 @@ class DesktopPet(QWidget):
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton:
             if self._is_dragging:
-                self._click_timer.stop()
+                #self._click_timer.stop()
                 self._is_dragging = False
                 self.setCursor(QCursor(Qt.ArrowCursor))
                 self.load_animation("idle")
             else:
+                # ✅ 未拖拽 → 检查按压时长
+                elapsed = self._press_timer.elapsed()
+                if elapsed < self.LONG_PRESS_THRESHOLD:
+                    # 短按 → 确认为单击
+                    self._on_single_click()
+                # else: 长按 → 什么都不做（或可在此处添加长按专属逻辑）
+
+                # 更新拖拽参考点（保留原有逻辑）
                 self._drag_pos = event.globalPos() - self.frameGeometry().topLeft()
             event.accept()
 

@@ -82,7 +82,7 @@ class DesktopPet(QWidget):
         # === 点击缓存机制（Buffer）===
         self._click_buffer = 0
         self._is_action_playing = False
-        self.MAX_BUFFER_SIZE = 2
+        self.MAX_BUFFER_SIZE = 1
 
         # === 加载初始动画 ===
         self.load_animation("idle")
@@ -116,7 +116,6 @@ class DesktopPet(QWidget):
     # ---------- 单击入口：仅负责缓存或触发 ----------
     def _on_single_click(self):
         """单击触发：不直接打断，而是缓存或排队执行"""
-        print(self._is_playing_jiao)
         if self._is_dragging:
             return
 
@@ -169,7 +168,7 @@ class DesktopPet(QWidget):
             self.player.stop()
             self.player.play()
 
-        self.load_animation("shout")
+        QTimer.singleShot(40, lambda: self.load_animation("shout"))
 
         # ⏱️ 连击窗口刷新
         self._combo_timer.start(700)
@@ -211,6 +210,7 @@ class DesktopPet(QWidget):
 
         if self._click_buffer > 0:
             self._click_buffer -= 1
+            self.load_animation("idle")
             self._execute_shout_action(is_first=False)
         else:
             self.load_animation("idle")
@@ -297,7 +297,7 @@ class DesktopPet(QWidget):
                 #self._click_timer.stop()
                 self._is_dragging = True
                 self.setCursor(QCursor(Qt.ClosedHandCursor))
-                self.load_animation("drag")
+                #self.load_animation("drag")
 
             if self._is_dragging:
                 new_pos = event.globalPos() - self._drag_pos
@@ -310,7 +310,7 @@ class DesktopPet(QWidget):
                 #self._click_timer.stop()
                 self._is_dragging = False
                 self.setCursor(QCursor(Qt.ArrowCursor))
-                self.load_animation("idle")
+                #self.load_animation("idle")
             else:
                 # ✅ 未拖拽 → 检查按压时长
                 elapsed = self._press_timer.elapsed()

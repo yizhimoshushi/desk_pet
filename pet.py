@@ -55,6 +55,9 @@ class DesktopPet(QWidget):
 
         self.PLAYBACK_RATE = 1.0
 
+        self.player.mediaStatusChanged.connect(self._on_media_status_changed)
+        self.player.durationChanged.connect(self._on_duration_changed)
+
         # 🆕 动态时长追踪：替代固定 base_duration
         self._current_shout_duration = 0       # 当前 shout 实际时长(ms)
         self._shout_fallback_duration = 2000   # 兜底时长(ms)，当 duration() 返回 0 时使用
@@ -66,6 +69,8 @@ class DesktopPet(QWidget):
         self._combo_timer.timeout.connect(self._on_combo_timeout)
         self._in_combo = False
         self._is_playing_jiao = False
+
+        self.add_rate = 0.05
 
         # === 长按/单击判定变量 ===
         self._press_time = 0  # 鼠标按下的时间戳(ms)
@@ -89,14 +94,14 @@ class DesktopPet(QWidget):
         self.show()
 
     # ---------- 🆕 动态时长回调 ----------
+    def _on_media_status_changed(self, status):
+        if status == QMediaPlayer.EndOfMedia and self._is_action_playing:
+            self._on_action_finished()
+
     def _on_duration_changed(self, duration_ms: int):
-        """
-        当媒体加载完成或 playbackRate 变更时，Qt 自动发射此信号。
-        duration_ms 已经是考虑了当前倍率后的实际播放时长。
-        """
-        # 仅在 shout 动作期间更新，避免 jiao 等其他音频干扰
+        """duration_ms 是原始时长，需按倍率换算"""
         if self._is_action_playing and duration_ms > 0:
-            self._current_shout_duration = duration_ms
+            self._current_shout_duration = int(duration_ms / self.PLAYBACK_RATE)
 
     # ---------- 单击入口：仅负责缓存或触发 ----------
     def _on_single_click(self):
@@ -114,7 +119,7 @@ class DesktopPet(QWidget):
             if self._click_buffer < self.MAX_BUFFER_SIZE:
                 self._click_buffer += 1
                 if self._in_combo:
-                    self.PLAYBACK_RATE = min(self.PLAYBACK_RATE + 0.005, 3.0)
+                    self.PLAYBACK_RATE += self.add_rate
         else:
             self._execute_shout_action(is_first=not self._in_combo)
 
@@ -129,7 +134,7 @@ class DesktopPet(QWidget):
             self._in_combo = True
             self.PLAYBACK_RATE = 1.0
         elif self._in_combo:
-            self.PLAYBACK_RATE = min(self.PLAYBACK_RATE + 0.005, 3.0)
+            self.PLAYBACK_RATE += self.add_rate
 
         # 确保音频源正确
         audio_path = self.audio_shout
@@ -154,8 +159,8 @@ class DesktopPet(QWidget):
         # setPlaybackRate 会触发 durationChanged，但为防信号延迟，
         # 这里用 singleShot 做兜底：如果 durationChanged 先到则以它为准，
         # 如果没到则用 fallback 保证不会卡死
-        fallback = self._shout_fallback_duration
-        QTimer.singleShot(fallback, self._try_finish_with_fallback)
+        #fallback = self._shout_fallback_duration
+        #QTimer.singleShot(fallback, self._try_finish_with_fallback)
 
     # ---------- 🆕 兜底完成检查 ----------
     def _try_finish_with_fallback(self):
@@ -190,7 +195,7 @@ class DesktopPet(QWidget):
             self._click_buffer -= 1
             self._execute_shout_action(is_first=False)
         else:
-            self.load_animation("idle")
+            self.load_animation("shout")
 
     # ---------- 连击超时：播放收尾音效 ----------
     def _on_combo_timeout(self):

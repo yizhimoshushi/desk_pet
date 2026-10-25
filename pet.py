@@ -68,6 +68,7 @@ class DesktopPet(QWidget):
         self._combo_timer.setSingleShot(True)
         self._combo_timer.timeout.connect(self._on_combo_timeout)
         self._in_combo = False
+        self._combo_num = 0
         self._is_playing_jiao = False
 
         self.add_rate = 0.05
@@ -95,8 +96,17 @@ class DesktopPet(QWidget):
 
     # ---------- 🆕 动态时长回调 ----------
     def _on_media_status_changed(self, status):
-        if status == QMediaPlayer.EndOfMedia and self._is_action_playing:
-            self._on_action_finished()
+        if status == QMediaPlayer.EndOfMedia:
+
+            # ① jiao 播完
+            if self._is_playing_jiao:
+                self._is_playing_jiao = False
+                self.load_animation("idle")
+                return
+
+            # ② shout 播完：交给 _on_action_finished（它内部会幂等判断并消费 buffer）
+            if self._is_action_playing:
+                self._on_action_finished()
 
     def _on_duration_changed(self, duration_ms: int):
         """duration_ms 是原始时长，需按倍率换算"""
@@ -106,35 +116,44 @@ class DesktopPet(QWidget):
     # ---------- 单击入口：仅负责缓存或触发 ----------
     def _on_single_click(self):
         """单击触发：不直接打断，而是缓存或排队执行"""
+        print(self._is_playing_jiao)
         if self._is_dragging:
             return
 
         if self._is_playing_jiao:
-            self._is_playing_jiao = False
-            self._in_combo = True
-            self.PLAYBACK_RATE = 1.0
-            self._click_buffer = 0
+            pass
 
+            # ② shout 播放期间点击：入缓存 + 加速 + 刷新 combo 窗口
         if self._is_action_playing:
             if self._click_buffer < self.MAX_BUFFER_SIZE:
                 self._click_buffer += 1
                 if self._in_combo:
+                    self._combo_num += 1
                     self.PLAYBACK_RATE += self.add_rate
+                # ✅ 每次点击都刷新 combo timer，才能实现"停手后才播 jiao"
+                self._combo_timer.start(700)
+            return
         else:
             self._execute_shout_action(is_first=not self._in_combo)
 
     # ---------- 实际执行 shout 动作（原子操作）----------
     def _execute_shout_action(self, is_first=False):
         """执行一次完整的 shout 动画+音频，结束后自动检查缓存"""
+
+        if self._is_playing_jiao:
+            return
+
         self._is_action_playing = True
         self._current_shout_duration = 0  # 重置，等待 durationChanged 信号填充
 
         # 连击倍率处理
         if is_first:
             self._in_combo = True
+            self._combo_num = 0
             self.PLAYBACK_RATE = 1.0
         elif self._in_combo:
             self.PLAYBACK_RATE += self.add_rate
+            self._combo_num += 1
 
         # 确保音频源正确
         audio_path = self.audio_shout
@@ -188,38 +207,51 @@ class DesktopPet(QWidget):
         # 防止重复触发（兜底 + durationChanged 可能都触发）
         if not self._is_action_playing:
             return
-
         self._is_action_playing = False
 
         if self._click_buffer > 0:
             self._click_buffer -= 1
             self._execute_shout_action(is_first=False)
         else:
-            self.load_animation("shout")
+            self.load_animation("idle")
+
 
     # ---------- 连击超时：播放收尾音效 ----------
     def _on_combo_timeout(self):
-        """0.7秒无新点击 → 连击结束，播放 jiao.mp3"""
+        # jiao 已在播放中，忽略
+        if self._is_playing_jiao:
+            return
+
+        # shout 还在播或有缓存：说明用户还在连击，继续等
         if self._is_action_playing or self._click_buffer > 0:
             self._combo_timer.start(700)
             return
 
         self._in_combo = False
-        self._is_playing_jiao = True
         self.PLAYBACK_RATE = 1.0
 
-        if os.path.exists(self.audio_jiao):
-            self.player.setMedia(QMediaContent(QUrl.fromLocalFile(self.audio_jiao)))
+        #jiao需要连击超过3次才会触发
+        if not self._combo_num > 3:
+            return
         else:
+            self._combo_num = 0
+
+        # 真正进入 jiao 阶段
+        self._is_playing_jiao = True
+
+
+        if not os.path.exists(self.audio_jiao):
             print(f"[警告] 未找到音频文件: {self.audio_jiao}")
             self._is_playing_jiao = False
+            self.load_animation("idle")
             return
 
+        self.player.setMedia(QMediaContent(QUrl.fromLocalFile(self.audio_jiao)))
         self.player.setPlaybackRate(1.0)
         self.player.stop()
         self.player.play()
 
-        QTimer.singleShot(500, lambda: setattr(self, '_is_playing_jiao', False))
+        self.load_animation("jiao")
 
     # ---------- 动画管理 ----------
     def load_animation(self, state: str):

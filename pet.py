@@ -168,7 +168,8 @@ class DesktopPet(QWidget):
             self.player.stop()
             self.player.play()
 
-        QTimer.singleShot(40, lambda: self.load_animation("shout"))
+        #QTimer.singleShot(40, lambda: self.load_animation("shout"))
+        self.load_animation("shout")
 
         # ⏱️ 连击窗口刷新
         self._combo_timer.start(700)
@@ -210,7 +211,7 @@ class DesktopPet(QWidget):
 
         if self._click_buffer > 0:
             self._click_buffer -= 1
-            self.load_animation("idle")
+            #self.load_animation("idle")
             self._execute_shout_action(is_first=False)
         else:
             self.load_animation("idle")

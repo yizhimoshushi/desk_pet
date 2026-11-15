@@ -1,7 +1,8 @@
 import sys
 import os
 from PyQt5.QtWidgets import (QApplication, QWidget, QLabel, QMenu,
-                             QAction, QSystemTrayIcon, QGraphicsDropShadowEffect)
+                             QAction, QSystemTrayIcon, QGraphicsDropShadowEffect,
+                             QSlider, QHBoxLayout, QVBoxLayout, QPushButton)
 from PyQt5.QtGui import QPixmap, QMovie, QIcon, QCursor
 from PyQt5.QtCore import Qt, QTimer, QPoint, QSize
 
@@ -9,6 +10,164 @@ from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
 from PyQt5.QtCore import QUrl
 
 from PyQt5.QtCore import QElapsedTimer
+
+class SizeSliderPopup(QWidget):
+    """横向滑块弹窗：拖动球实时调整桌宠大小"""
+
+    MIN_SIZE = 32
+    MAX_SIZE = 1024
+
+    def __init__(self, pet):
+        super().__init__()
+        self.pet = pet
+
+        # 无边框 + 置顶 + 半透明背景
+        self.setWindowFlags(
+            Qt.FramelessWindowHint |
+            Qt.WindowStaysOnTopHint |
+            Qt.Tool
+        )
+        self.setAttribute(Qt.WA_TranslucentBackground)
+
+        # 外层卡片（白底圆角）
+        self.card = QWidget(self)
+        self.card.setObjectName("card")
+        self.card.setStyleSheet("""
+            QWidget#card {
+                background-color: rgba(255, 255, 255, 235);
+                border-radius: 14px;
+                border: 1px solid rgba(0, 0, 0, 40);
+            }
+        """)
+
+        # 布局：标题 + 滑块 + 数值 + 关闭按钮
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(self.card)
+
+        lay = QVBoxLayout(self.card)
+        lay.setContentsMargins(16, 12, 16, 12)
+        lay.setSpacing(8)
+
+        self.title = QLabel(f"📏 调整大小：{pet.pet_size} px")
+        self.title.setStyleSheet("font-size: 13px; color: #333;")
+        lay.addWidget(self.title)
+
+        row = QHBoxLayout()
+        row.setSpacing(8)
+
+        # 小图标
+        lbl_small = QLabel("🐭")
+        lbl_big = QLabel("🐘")
+        lbl_small.setStyleSheet("font-size: 16px;")
+        lbl_big.setStyleSheet("font-size: 20px;")
+
+        # === 核心：QSlider ===
+        self.slider = QSlider(Qt.Horizontal)
+        self.slider.setMinimum(self.MIN_SIZE)
+        self.slider.setMaximum(self.MAX_SIZE)
+        self.slider.setValue(pet.pet_size)
+        self.slider.setFixedWidth(260)
+        self.slider.setStyleSheet("""
+            QSlider::groove:horizontal {
+                height: 6px;
+                background: #d0d0d0;
+                border-radius: 3px;
+            }
+            QSlider::sub-page:horizontal {
+                background: #4a9eff;
+                border-radius: 3px;
+            }
+            QSlider::handle:horizontal {
+                width: 20px;
+                height: 20px;
+                margin: -8px 0;
+                border-radius: 10px;
+                background: qradialgradient(
+                    cx:0.4, cy:0.4, radius:0.8,
+                    fx:0.4, fy:0.4,
+                    stop:0 #ffffff,
+                    stop:0.6 #4a9eff,
+                    stop:1 #2f7be0
+                );
+                border: 2px solid #2f7be0;
+            }
+            QSlider::handle:horizontal:hover {
+                background: qradialgradient(
+                    cx:0.4, cy:0.4, radius:0.8,
+                    fx:0.4, fy:0.4,
+                    stop:0 #ffffff,
+                    stop:0.6 #6db3ff,
+                    stop:1 #4a9eff
+                );
+            }
+        """)
+        self.slider.valueChanged.connect(self._on_value_changed)
+
+        # 鼠标滚轮也能微调
+        self.slider.wheelEvent = self._slider_wheel
+
+        row.addWidget(lbl_small)
+        row.addWidget(self.slider)
+        row.addWidget(lbl_big)
+        lay.addLayout(row)
+
+        # 关闭按钮
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        btn_close = QPushButton("关闭")
+        btn_close.setFixedWidth(60)
+        btn_close.setStyleSheet("""
+            QPushButton {
+                background: #f0f0f0; border-radius: 6px;
+                padding: 4px 8px; color: #444;
+            }
+            QPushButton:hover { background: #e0e0e0; }
+        """)
+        btn_close.clicked.connect(self.close)
+        btn_row.addWidget(btn_close)
+        lay.addLayout(btn_row)
+
+        self.adjustSize()
+
+    # 拖动球 → 实时改大小
+    def _on_value_changed(self, value):
+        # 吸附到 16 的倍数，视觉更整
+        snapped = int(round(value / 16.0)) * 16
+        snapped = max(self.MIN_SIZE, min(self.MAX_SIZE, snapped))
+        self.title.setText(f"📏 调整大小：{snapped} px")
+        self.pet.resize_pet(snapped)
+
+    # 滚轮微调 ±16
+    def _slider_wheel(self, event):
+        step = 16 if event.angleDelta().y() > 0 else -16
+        new_val = max(self.MIN_SIZE, min(self.MAX_SIZE, self.slider.value() + step))
+        self.slider.setValue(new_val)
+        event.accept()
+
+    # 在桌宠旁边弹出
+    def show_near(self, pet):
+        # 先显示再定位，拿到实际尺寸
+        self.adjustSize()
+        gx = pet.geometry()
+        screen = QApplication.primaryScreen().availableGeometry()
+
+        # 默认在桌宠左上方
+        x = gx.center().x() - self.width() // 2
+        y = gx.top() - self.height() - 10
+
+        # 防出屏
+        if y < screen.top() + 10:
+            y = gx.bottom() + 10
+        if x < screen.left() + 10:
+            x = screen.left() + 10
+        if x + self.width() > screen.right() - 10:
+            x = screen.right() - self.width() - 10
+
+        self.move(x, y)
+        self.show()
+        self.raise_()
+        self.activateWindow()
 
 
 class DesktopPet(QWidget):
@@ -254,6 +413,36 @@ class DesktopPet(QWidget):
 
         self.load_animation("jiao")
 
+    # ---------- 🆕 调整桌宠大小 ----------
+    def resize_pet(self, new_size: int):
+        if new_size == self.pet_size:
+            return
+        self.pet_size = new_size
+        self.setFixedSize(new_size, new_size)
+        self.label.setGeometry(0, 0, new_size, new_size)
+
+        # 🆕 节流：拖动中只改尺寸，松手 150ms 后统一重载动画
+        if not hasattr(self, "_resize_reload_timer"):
+            self._resize_reload_timer = QTimer(self)
+            self._resize_reload_timer.setSingleShot(True)
+            self._resize_reload_timer.timeout.connect(
+                lambda: self.load_animation(self.current_state)
+            )
+        self._resize_reload_timer.start(150)
+
+    def open_size_slider(self):
+        # 已存在则复用，避免开多个
+        if getattr(self, "_size_popup", None) is not None:
+            try:
+                if self._size_popup.isVisible():
+                    self._size_popup.close()
+                    return
+            except RuntimeError:
+                self._size_popup = None
+
+        self._size_popup = SizeSliderPopup(self)
+        self._size_popup.show_near(self)
+
     # ---------- 动画管理 ----------
     def load_animation(self, state: str):
         path = f"assets/{state}.gif"
@@ -326,15 +515,24 @@ class DesktopPet(QWidget):
 
     def contextMenuEvent(self, event):
         menu = QMenu(self)
-        act_quit = QAction("👋 退出", self)
-        act_quit.triggered.connect(QApplication.quit)
+
+        act_size = QAction("📏 调整大小…", self)
+        act_size.triggered.connect(self.open_size_slider)
+        menu.addAction(act_size)
+
+        menu.addSeparator()
+
         act_reset = QAction("🔄 回到屏幕中央", self)
         act_reset.triggered.connect(lambda: self.move(
             QApplication.primaryScreen().geometry().center() - self.rect().center()
         ))
         menu.addAction(act_reset)
+
         menu.addSeparator()
+        act_quit = QAction("👋 退出", self)
+        act_quit.triggered.connect(QApplication.quit)
         menu.addAction(act_quit)
+
         menu.exec_(event.globalPos())
 
 
